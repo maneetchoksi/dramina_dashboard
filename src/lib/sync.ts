@@ -67,7 +67,7 @@ export async function syncCustomerData() {
   // Store each customer's data and add to sorted sets
   for (const [customerId, metrics] of customerMetrics) {
     // Store customer data
-    pipeline.hset(`customer:${customerId}`, metrics);
+    pipeline.hset(`customer:${customerId}`, { ...metrics });
     
     // Add to sorted sets for rankings
     pipeline.zadd('customers:by:visits', {
