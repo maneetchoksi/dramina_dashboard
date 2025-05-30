@@ -15,7 +15,7 @@ export async function GET() {
       'customers:by:visits:rak'
     ];
 
-    const sortedSetInfo: any = {};
+    const sortedSetInfo: Record<string, { size: number; top5: Array<{ customerId: string; score: string }> }> = {};
     
     for (const setKey of sortedSets) {
       const size = await redis.zcard(setKey);
@@ -55,7 +55,7 @@ export async function GET() {
     }
 
     // Count customers by managerId
-    const managerIdCounts: any = {};
+    const managerIdCounts: Record<string, number> = {};
     for (const detail of customerDetails) {
       const managerId = detail.data?.managerId || 'none';
       managerIdCounts[managerId] = (managerIdCounts[managerId] || 0) + 1;
