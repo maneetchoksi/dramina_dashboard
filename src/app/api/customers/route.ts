@@ -8,6 +8,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const sortBy = searchParams.get('sortBy') || 'visits';
     const limit = parseInt(searchParams.get('limit') || '10');
+    const location = searchParams.get('location'); // 'jumeirah', 'rak', or null for all
 
     // Check if we should auto-sync (data older than 60 minutes)
     if (await shouldAutoSync(60)) {
@@ -19,8 +20,12 @@ export async function GET(request: Request) {
       }
     }
 
-    // Get sorted customer IDs based on metric
-    const sortKey = sortBy === 'spend' ? 'customers:by:spend' : 'customers:by:visits';
+    // Get sorted customer IDs based on metric and location
+    let sortKey = sortBy === 'spend' ? 'customers:by:spend' : 'customers:by:visits';
+    if (location) {
+      sortKey += `:${location}`;
+    }
+    
     // Fetch more than needed to account for filtering
     const topCustomerIds = await redis.zrange(sortKey, 0, limit * 2, { rev: true });
 
@@ -65,6 +70,7 @@ export async function GET(request: Request) {
       customers,
       lastSync,
       sortBy,
+      location,
     });
   } catch (error) {
     console.error('Error fetching customers:', error);

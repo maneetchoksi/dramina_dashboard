@@ -51,6 +51,7 @@ export interface CustomerMetrics {
   visitCount: number;
   totalSpend: number;
   lastUpdated: string;
+  managerId?: number;
 }
 
 export const EVENT_IDS = {

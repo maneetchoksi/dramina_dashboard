@@ -25,6 +25,7 @@ export async function syncCustomerData() {
   // Process operations and aggregate by customer
   const customerMetrics = new Map<string, CustomerMetrics>();
   const processedOperationIds = new Set<number>();
+  const customerManagerMap = new Map<string, number>(); // Track latest managerId per customer
 
   for (const operation of response.data.data) {
     // Skip if we've already processed this operation (deduplication)
@@ -35,6 +36,9 @@ export async function syncCustomerData() {
 
     const customerId = operation.customerId;
     
+    // Track the latest managerId for this customer
+    customerManagerMap.set(customerId, operation.managerId);
+    
     // Initialize customer metrics if not exists
     if (!customerMetrics.has(customerId)) {
       customerMetrics.set(customerId, {
@@ -44,10 +48,17 @@ export async function syncCustomerData() {
         visitCount: 0,
         totalSpend: 0,
         lastUpdated: new Date().toISOString(),
+        managerId: operation.managerId,
       });
     }
 
     const metrics = customerMetrics.get(customerId)!;
+    
+    // Update managerId only if the operation has a non-null managerId
+    // This ensures we keep the last known valid managerId
+    if (operation.managerId !== null) {
+      metrics.managerId = operation.managerId;
+    }
 
     // Update metrics based on event type
     if (operation.eventId === EVENT_IDS.VISIT) {
@@ -63,6 +74,10 @@ export async function syncCustomerData() {
   // Clear existing sorted sets
   pipeline.del('customers:by:visits');
   pipeline.del('customers:by:spend');
+  pipeline.del('customers:by:visits:jumeirah');
+  pipeline.del('customers:by:spend:jumeirah');
+  pipeline.del('customers:by:visits:rak');
+  pipeline.del('customers:by:spend:rak');
 
   // Store each customer's data and add to sorted sets
   for (const [customerId, metrics] of customerMetrics) {
@@ -79,6 +94,27 @@ export async function syncCustomerData() {
       score: metrics.totalSpend,
       member: customerId,
     });
+    
+    // Add to location-specific sorted sets
+    if (metrics.managerId === 1547855) { // Jumeirah
+      pipeline.zadd('customers:by:visits:jumeirah', {
+        score: metrics.visitCount,
+        member: customerId,
+      });
+      pipeline.zadd('customers:by:spend:jumeirah', {
+        score: metrics.totalSpend,
+        member: customerId,
+      });
+    } else if (metrics.managerId === 1547856) { // RAK
+      pipeline.zadd('customers:by:visits:rak', {
+        score: metrics.visitCount,
+        member: customerId,
+      });
+      pipeline.zadd('customers:by:spend:rak', {
+        score: metrics.totalSpend,
+        member: customerId,
+      });
+    }
   }
 
   // Set last sync timestamp

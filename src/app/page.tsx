@@ -9,11 +9,23 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 interface DashboardData {
   customers: CustomerMetrics[];
   lastSync: string | null;
+  location?: string;
 }
 
+type LocationTab = 'all' | 'jumeirah' | 'rak';
+
 export default function Home() {
-  const [topByVisits, setTopByVisits] = useState<DashboardData | null>(null);
-  const [topBySpend, setTopBySpend] = useState<DashboardData | null>(null);
+  const [activeTab, setActiveTab] = useState<LocationTab>('all');
+  const [topByVisits, setTopByVisits] = useState<Record<LocationTab, DashboardData | null>>({
+    all: null,
+    jumeirah: null,
+    rak: null,
+  });
+  const [topBySpend, setTopBySpend] = useState<Record<LocationTab, DashboardData | null>>({
+    all: null,
+    jumeirah: null,
+    rak: null,
+  });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,21 +35,41 @@ export default function Home() {
       setLoading(true);
       setError(null);
 
-      // Fetch both rankings in parallel
-      const [visitsRes, spendRes] = await Promise.all([
-        fetch('/api/customers?sortBy=visits&limit=10'),
-        fetch('/api/customers?sortBy=spend&limit=10'),
+      // Fetch data for all locations
+      const locations: { key: LocationTab; param: string | null }[] = [
+        { key: 'all', param: null },
+        { key: 'jumeirah', param: 'jumeirah' },
+        { key: 'rak', param: 'rak' },
+      ];
+
+      const promises = locations.flatMap(({ key, param }) => [
+        fetch(`/api/customers?sortBy=visits&limit=10${param ? `&location=${param}` : ''}`).then(async (res) => ({
+          key,
+          type: 'visits' as const,
+          data: await res.json(),
+        })),
+        fetch(`/api/customers?sortBy=spend&limit=10${param ? `&location=${param}` : ''}`).then(async (res) => ({
+          key,
+          type: 'spend' as const,
+          data: await res.json(),
+        })),
       ]);
 
-      if (!visitsRes.ok || !spendRes.ok) {
-        throw new Error('Failed to fetch customer data');
-      }
+      const results = await Promise.all(promises);
 
-      const visitsData = await visitsRes.json();
-      const spendData = await spendRes.json();
+      const newTopByVisits = { ...topByVisits };
+      const newTopBySpend = { ...topBySpend };
 
-      setTopByVisits(visitsData);
-      setTopBySpend(spendData);
+      results.forEach(({ key, type, data }) => {
+        if (type === 'visits') {
+          newTopByVisits[key] = data;
+        } else {
+          newTopBySpend[key] = data;
+        }
+      });
+
+      setTopByVisits(newTopByVisits);
+      setTopBySpend(newTopBySpend);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -66,6 +98,7 @@ export default function Home() {
 
   useEffect(() => {
     fetchCustomers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const formatCurrency = (amount: number) => {
@@ -83,6 +116,12 @@ export default function Home() {
     });
   };
 
+  const tabLabels: Record<LocationTab, string> = {
+    all: 'All Locations',
+    jumeirah: 'Jumeirah',
+    rak: 'RAK',
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -91,15 +130,18 @@ export default function Home() {
     );
   }
 
+  const currentVisitsData = topByVisits[activeTab];
+  const currentSpendData = topBySpend[activeTab];
+
   return (
     <main className="min-h-screen p-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-bold">Dr. Amina Al Amiri Loyalty Dashboard</h1>
           <div className="flex items-center gap-4">
-            {topByVisits?.lastSync && (
+            {topByVisits.all?.lastSync && (
               <span className="text-sm text-muted-foreground">
-                Last synced: {formatDate(topByVisits.lastSync)}
+                Last synced: {formatDate(topByVisits.all.lastSync)}
               </span>
             )}
             <Button
@@ -119,16 +161,31 @@ export default function Home() {
           </Alert>
         )}
 
+        {/* Location Tabs */}
+        <div className="flex gap-2 mb-6">
+          {(Object.keys(tabLabels) as LocationTab[]).map((tab) => (
+            <Button
+              key={tab}
+              variant={activeTab === tab ? 'default' : 'outline'}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tabLabels[tab]}
+            </Button>
+          ))}
+        </div>
+
         <div className="grid md:grid-cols-2 gap-8">
           {/* Top Customers by Visits */}
           <Card>
             <CardHeader>
               <CardTitle>Top Customers by Visits</CardTitle>
-              <CardDescription>Most frequent visitors</CardDescription>
+              <CardDescription>
+                Most frequent visitors {activeTab !== 'all' && `at ${tabLabels[activeTab]}`}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {topByVisits?.customers.map((customer, index) => (
+                {currentVisitsData?.customers.map((customer, index) => (
                   <div
                     key={customer.customerId}
                     className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
@@ -146,7 +203,7 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
-                {(!topByVisits?.customers || topByVisits.customers.length === 0) && (
+                {(!currentVisitsData?.customers || currentVisitsData.customers.length === 0) && (
                   <p className="text-muted-foreground text-center py-4">No data available</p>
                 )}
               </div>
@@ -157,11 +214,13 @@ export default function Home() {
           <Card>
             <CardHeader>
               <CardTitle>Top Customers by Spend</CardTitle>
-              <CardDescription>Highest spending customers</CardDescription>
+              <CardDescription>
+                Highest spending customers {activeTab !== 'all' && `at ${tabLabels[activeTab]}`}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {topBySpend?.customers.map((customer, index) => (
+                {currentSpendData?.customers.map((customer, index) => (
                   <div
                     key={customer.customerId}
                     className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
@@ -179,7 +238,7 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
-                {(!topBySpend?.customers || topBySpend.customers.length === 0) && (
+                {(!currentSpendData?.customers || currentSpendData.customers.length === 0) && (
                   <p className="text-muted-foreground text-center py-4">No data available</p>
                 )}
               </div>

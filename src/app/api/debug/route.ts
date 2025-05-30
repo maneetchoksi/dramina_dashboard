@@ -5,59 +5,90 @@ export async function GET() {
   console.log('Debug endpoint called');
   
   try {
-    // Get top 5 customers from sorted set with scores
-    const topCustomersWithScores = await redis.zrange('customers:by:spend', 0, 4, {
-      withScores: true,
-      rev: true // Get highest scores first
-    });
+    // Check all sorted sets
+    const sortedSets = [
+      'customers:by:spend',
+      'customers:by:visits',
+      'customers:by:spend:jumeirah',
+      'customers:by:visits:jumeirah',
+      'customers:by:spend:rak',
+      'customers:by:visits:rak'
+    ];
 
-    // Parse the results - zrange with scores returns [member, score, member, score, ...]
-    const topCustomers = [];
-    for (let i = 0; i < topCustomersWithScores.length; i += 2) {
-      topCustomers.push({
-        customerId: topCustomersWithScores[i],
-        totalSpend: topCustomersWithScores[i + 1]
+    const sortedSetInfo: any = {};
+    
+    for (const setKey of sortedSets) {
+      const size = await redis.zcard(setKey);
+      const top5WithScores = await redis.zrange(setKey, 0, 4, {
+        withScores: true,
+        rev: true
       });
+      
+      // Parse the results
+      const topMembers = [];
+      for (let i = 0; i < top5WithScores.length; i += 2) {
+        topMembers.push({
+          customerId: top5WithScores[i],
+          score: top5WithScores[i + 1]
+        });
+      }
+      
+      sortedSetInfo[setKey] = {
+        size,
+        top5: topMembers
+      };
     }
 
-    // Get the actual customer data for these IDs
-    const customerData = [];
-    for (const { customerId } of topCustomers) {
+    // Get a sample of customer data to check managerId
+    const allCustomerIds = await redis.zrange('customers:by:spend', 0, 19, { rev: true });
+    const customerDetails = [];
+    
+    for (const customerId of allCustomerIds.slice(0, 10)) {
       const customer = await redis.hgetall(`customer:${customerId}`);
-      customerData.push({
+      customerDetails.push({
         customerId,
-        redisKey: `customer:${customerId}`,
         data: customer,
-        dataKeys: Object.keys(customer || {}),
-        isEmpty: !customer || Object.keys(customer).length === 0
+        managerId: customer?.managerId,
+        location: customer?.managerId === '1547855' ? 'jumeirah' : 
+                  customer?.managerId === '1547856' ? 'rak' : 'unknown'
       });
     }
 
-    // Also check if the sorted set exists and its size
-    const sortedSetSize = await redis.zcard('customers:by:spend');
+    // Count customers by managerId
+    const managerIdCounts: any = {};
+    for (const detail of customerDetails) {
+      const managerId = detail.data?.managerId || 'none';
+      managerIdCounts[managerId] = (managerIdCounts[managerId] || 0) + 1;
+    }
 
-    // Check a few other potential key patterns
-    const allKeys = await redis.keys('customer*');
-    const keyPatterns = {
-      'customer:*': allKeys.filter(k => k.startsWith('customer:')).slice(0, 5),
-      'customers:*': allKeys.filter(k => k.startsWith('customers:')).slice(0, 5),
-    };
+    // Check if location-specific sets have the same customers
+    const jumeirahSpendIds = await redis.zrange('customers:by:spend:jumeirah', 0, -1, { rev: true });
+    const rakSpendIds = await redis.zrange('customers:by:spend:rak', 0, -1, { rev: true });
+    
+    // Check overlap between main set and location sets
+    const mainSpendIds = await redis.zrange('customers:by:spend', 0, -1, { rev: true });
+    const jumeirahInMain = jumeirahSpendIds.filter(id => mainSpendIds.includes(id));
+    const rakInMain = rakSpendIds.filter(id => mainSpendIds.includes(id));
 
     return NextResponse.json({
       success: true,
       debug: {
-        sortedSet: {
-          key: 'customers:by:spend',
-          size: sortedSetSize,
-          top5WithScores: topCustomers
+        sortedSets: sortedSetInfo,
+        sampleCustomers: customerDetails,
+        managerIdDistribution: managerIdCounts,
+        locationSetAnalysis: {
+          jumeirah: {
+            totalCustomers: jumeirahSpendIds.length,
+            sampleIds: jumeirahSpendIds.slice(0, 5),
+            overlapWithMain: jumeirahInMain.length
+          },
+          rak: {
+            totalCustomers: rakSpendIds.length,
+            sampleIds: rakSpendIds.slice(0, 5),
+            overlapWithMain: rakInMain.length
+          }
         },
-        customerData,
-        keyPatterns,
-        summary: {
-          totalKeysFound: allKeys.length,
-          sortedSetExists: sortedSetSize > 0,
-          hasCustomerData: customerData.some(c => !c.isEmpty)
-        }
+        lastSync: await redis.get('sync:last')
       }
     });
   } catch (error) {
