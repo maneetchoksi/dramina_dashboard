@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dramina Dashboard
+
+A loyalty program dashboard for an aesthetics clinic to track and display top customers by visits and spend.
+
+## Features
+
+- 📊 Real-time customer rankings by visits and spend
+- 🔄 Automatic data synchronization (refreshes hourly when page loads)
+- 💳 Integration with Digital Wallet Cards loyalty API
+- 🚀 Fast performance with Redis caching
+- 📱 Responsive design for all devices
+
+## Tech Stack
+
+- **Framework**: Next.js 15.3.3 with App Router
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS v4
+- **Database**: Upstash Redis
+- **Deployment**: Vercel
+- **UI Components**: shadcn/ui
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
+1. Node.js 18+ installed
+2. Upstash Redis account
+3. Loyalty program API credentials
+
+### Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/yourusername/dramina_dashboard.git
+cd dramina_dashboard
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables:
+```bash
+cp .env.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Update `.env.local` with your credentials:
+```env
+# Loyalty Program API
+LOYALTY_API_URL=https://api.digitalwallet.cards/api/v2/operations/
+LOYALTY_API_KEY=your_api_key_here
+LOYALTY_TEMPLATE_ID=646683
 
-## Learn More
+# Upstash Redis
+UPSTASH_REDIS_REST_URL=https://your-redis-instance.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your_redis_token_here
+```
 
-To learn more about Next.js, take a look at the following resources:
+5. Run the development server:
+```bash
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open [http://localhost:3000](http://localhost:3000) to view the dashboard.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deployment
 
-## Deploy on Vercel
+### Deploy to Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Push your code to GitHub
+2. Import the project in [Vercel](https://vercel.com/new)
+3. Add environment variables in Vercel dashboard:
+   - `LOYALTY_API_URL`
+   - `LOYALTY_API_KEY`
+   - `LOYALTY_TEMPLATE_ID`
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+4. Deploy!
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The dashboard will automatically sync data when:
+- The page loads and data is older than 60 minutes
+- The manual sync button is clicked
+
+## Development
+
+```bash
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Run production build
+npm run start
+
+# Run linting
+npm run lint
+```
+
+## Architecture
+
+- **API Routes**: Handle data fetching and synchronization
+- **Redis Storage**: Customer data cached with sorted sets for rankings
+- **Auto-sync**: Data refreshes automatically if older than 60 minutes
+- **Event Processing**: Tracks visits (eventId: 42) and purchases (eventId: 9)
