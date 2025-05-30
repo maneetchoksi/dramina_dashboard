@@ -25,11 +25,11 @@ export async function GET() {
       });
       
       // Parse the results
-      const topMembers = [];
+      const topMembers: Array<{ customerId: string; score: string }> = [];
       for (let i = 0; i < top5WithScores.length; i += 2) {
         topMembers.push({
-          customerId: top5WithScores[i],
-          score: top5WithScores[i + 1]
+          customerId: String(top5WithScores[i]),
+          score: String(top5WithScores[i + 1])
         });
       }
       
