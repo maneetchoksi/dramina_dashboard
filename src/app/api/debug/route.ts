@@ -57,7 +57,7 @@ export async function GET() {
     // Count customers by managerId
     const managerIdCounts: Record<string, number> = {};
     for (const detail of customerDetails) {
-      const managerId = detail.data?.managerId || 'none';
+      const managerId = String(detail.data?.managerId || 'none');
       managerIdCounts[managerId] = (managerIdCounts[managerId] || 0) + 1;
     }
 
