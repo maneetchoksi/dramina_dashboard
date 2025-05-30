@@ -95,7 +95,7 @@ export default function Home() {
     <main className="min-h-screen p-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold">Loyalty Dashboard</h1>
+          <h1 className="text-4xl font-bold">Dr. Amina Al Amiri Loyalty Dashboard</h1>
           <div className="flex items-center gap-4">
             {topByVisits?.lastSync && (
               <span className="text-sm text-muted-foreground">
