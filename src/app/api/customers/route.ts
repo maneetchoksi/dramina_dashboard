@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { redis } from '@/lib/redis';
+import { pool } from '@/lib/db';
 import { CustomerMetrics } from '@/types/loyalty';
 import { syncCustomerData, shouldAutoSync } from '@/lib/sync';
 
@@ -20,58 +20,62 @@ export async function GET(request: Request) {
       }
     }
 
-    // Get sorted customer IDs based on metric and location
-    let sortKey = sortBy === 'spend' ? 'customers:by:spend' : 'customers:by:visits';
-    if (location) {
-      sortKey += `:${location}`;
-    }
+    const client = await pool.connect();
     
-    // Fetch more than needed to account for filtering
-    const topCustomerIds = await redis.zrange(sortKey, 0, limit * 2, { rev: true });
+    try {
+      // Build query based on sorting and location
+      let whereClause = '';
+      const orderBy = sortBy === 'spend' ? 'total_spend DESC' : 'visit_count DESC';
+      const filterCondition = sortBy === 'spend' ? 'total_spend > 0' : 'visit_count > 0';
+      
+      if (location === 'jumeirah') {
+        whereClause = 'WHERE manager_id = 1547855';
+      } else if (location === 'rak') {
+        whereClause = 'WHERE manager_id = 1547856';
+      }
+      
+      // Add filter condition
+      if (whereClause) {
+        whereClause += ` AND ${filterCondition}`;
+      } else {
+        whereClause = `WHERE ${filterCondition}`;
+      }
+      
+      const query = `
+        SELECT customer_id, first_name, surname, visit_count, total_spend, manager_id, last_updated
+        FROM customers
+        ${whereClause}
+        ORDER BY ${orderBy}
+        LIMIT $1
+      `;
+      
+      const result = await client.query(query, [limit]);
+      
+      // Convert to CustomerMetrics format
+      const customers: CustomerMetrics[] = result.rows.map(row => ({
+        customerId: row.customer_id,
+        firstName: row.first_name,
+        surname: row.surname,
+        visitCount: row.visit_count,
+        totalSpend: parseFloat(row.total_spend),
+        managerId: row.manager_id,
+        lastUpdated: row.last_updated.toISOString(),
+      }));
 
-    if (!topCustomerIds || topCustomerIds.length === 0) {
+      // Get last sync time
+      const syncResult = await client.query('SELECT value FROM sync_metadata WHERE key = $1', ['last_sync']);
+      const lastSync = syncResult.rows.length > 0 ? syncResult.rows[0].value : null;
+
       return NextResponse.json({
         success: true,
-        customers: [],
-        lastSync: await redis.get('sync:last'),
+        customers,
+        lastSync,
+        sortBy,
+        location,
       });
+    } finally {
+      client.release();
     }
-
-    // Fetch customer details for each ID
-    const pipeline = redis.pipeline();
-    for (const customerId of topCustomerIds) {
-      pipeline.hgetall(`customer:${customerId}`);
-    }
-    
-    const results = await pipeline.exec();
-    
-    // Convert results to CustomerMetrics array and filter out zero values
-    const customers: CustomerMetrics[] = results
-      .map((result) => result as CustomerMetrics)
-      .filter(Boolean)
-      .filter((customer) => {
-        // Convert string values to numbers for comparison
-        const totalSpend = typeof customer.totalSpend === 'string' ? parseFloat(customer.totalSpend) : customer.totalSpend;
-        const visitCount = typeof customer.visitCount === 'string' ? parseInt(customer.visitCount) : customer.visitCount;
-        
-        if (sortBy === 'spend') {
-          return totalSpend > 0;
-        } else {
-          return visitCount > 0;
-        }
-      })
-      .slice(0, limit);
-
-    // Get last sync time
-    const lastSync = await redis.get('sync:last');
-
-    return NextResponse.json({
-      success: true,
-      customers,
-      lastSync,
-      sortBy,
-      location,
-    });
   } catch (error) {
     console.error('Error fetching customers:', error);
     return NextResponse.json(

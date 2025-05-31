@@ -1,33 +1,52 @@
 import axios from 'axios';
-import { redis } from '@/lib/redis';
+import { pool } from '@/lib/db';
 import { 
   LoyaltyApiResponse, 
+  LoyaltyOperation,
   CustomerMetrics, 
   EVENT_IDS 
 } from '@/types/loyalty';
 
 export async function syncCustomerData() {
-  // Fetch all operations from the loyalty API
-  const response = await axios.get<LoyaltyApiResponse>(
-    `${process.env.LOYALTY_API_URL}?templateId=${process.env.LOYALTY_TEMPLATE_ID}`,
-    {
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': process.env.LOYALTY_API_KEY!,
-      },
-    }
-  );
+  // Fetch all operations from the loyalty API with pagination
+  const allOperations: LoyaltyOperation[] = [];
+  let currentPage = 1;
+  let totalPages = 1;
 
-  if (response.data.code !== 200) {
-    throw new Error('Failed to fetch loyalty data');
-  }
+  do {
+    const response = await axios.get<LoyaltyApiResponse>(
+      `${process.env.LOYALTY_API_URL}?templateId=${process.env.LOYALTY_TEMPLATE_ID}&page=${currentPage}&limit=1000&startDate=2025-05-28`,
+      {
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': process.env.LOYALTY_API_KEY!,
+        },
+      }
+    );
+
+    if (response.data.code !== 200) {
+      throw new Error('Failed to fetch loyalty data');
+    }
+
+    // Add operations from this page
+    allOperations.push(...response.data.data);
+    
+    // Calculate total pages based on metadata
+    const { totalItems, itemsPerPage } = response.data.meta;
+    totalPages = Math.ceil(totalItems / itemsPerPage);
+    
+    console.log(`Fetched page ${currentPage}/${totalPages} (${response.data.data.length} operations)`);
+    currentPage++;
+  } while (currentPage <= totalPages);
+
+  console.log(`Total operations fetched: ${allOperations.length}`);
 
   // Process operations and aggregate by customer
   const customerMetrics = new Map<string, CustomerMetrics>();
   const processedOperationIds = new Set<number>();
   const customerManagerMap = new Map<string, number>(); // Track latest managerId per customer
 
-  for (const operation of response.data.data) {
+  for (const operation of allOperations) {
     // Skip if we've already processed this operation (deduplication)
     if (processedOperationIds.has(operation.id)) {
       continue;
@@ -68,60 +87,58 @@ export async function syncCustomerData() {
     }
   }
 
-  // Store in Redis using pipeline for efficiency
-  const pipeline = redis.pipeline();
-
-  // Clear existing sorted sets
-  pipeline.del('customers:by:visits');
-  pipeline.del('customers:by:spend');
-  pipeline.del('customers:by:visits:jumeirah');
-  pipeline.del('customers:by:spend:jumeirah');
-  pipeline.del('customers:by:visits:rak');
-  pipeline.del('customers:by:spend:rak');
-
-  // Store each customer's data and add to sorted sets
-  for (const [customerId, metrics] of customerMetrics) {
-    // Store customer data
-    pipeline.hset(`customer:${customerId}`, { ...metrics });
+  // Store in PostgreSQL using transaction for efficiency
+  const client = await pool.connect();
+  
+  try {
+    await client.query('BEGIN');
     
-    // Add to sorted sets for rankings
-    pipeline.zadd('customers:by:visits', {
-      score: metrics.visitCount,
-      member: customerId,
-    });
+    // Clear existing customer data
+    await client.query('DELETE FROM customers');
     
-    pipeline.zadd('customers:by:spend', {
-      score: metrics.totalSpend,
-      member: customerId,
-    });
-    
-    // Add to location-specific sorted sets
-    if (metrics.managerId === 1547855) { // Jumeirah
-      pipeline.zadd('customers:by:visits:jumeirah', {
-        score: metrics.visitCount,
-        member: customerId,
-      });
-      pipeline.zadd('customers:by:spend:jumeirah', {
-        score: metrics.totalSpend,
-        member: customerId,
-      });
-    } else if (metrics.managerId === 1547856) { // RAK
-      pipeline.zadd('customers:by:visits:rak', {
-        score: metrics.visitCount,
-        member: customerId,
-      });
-      pipeline.zadd('customers:by:spend:rak', {
-        score: metrics.totalSpend,
-        member: customerId,
-      });
+    // Insert all customer data in batch using upsert
+    const values = Array.from(customerMetrics.values());
+    if (values.length > 0) {
+      const insertQuery = `
+        INSERT INTO customers (customer_id, first_name, surname, visit_count, total_spend, manager_id)
+        VALUES ${values.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ')}
+        ON CONFLICT (customer_id) DO UPDATE SET
+          first_name = EXCLUDED.first_name,
+          surname = EXCLUDED.surname,
+          visit_count = EXCLUDED.visit_count,
+          total_spend = EXCLUDED.total_spend,
+          manager_id = EXCLUDED.manager_id,
+          last_updated = CURRENT_TIMESTAMP
+      `;
+      
+      const insertValues = values.flatMap(metrics => [
+        metrics.customerId,
+        metrics.firstName,
+        metrics.surname,
+        metrics.visitCount,
+        metrics.totalSpend,
+        metrics.managerId
+      ]);
+      
+      await client.query(insertQuery, insertValues);
     }
+    
+    // Set last sync timestamp
+    await client.query(`
+      INSERT INTO sync_metadata (key, value, updated_at)
+      VALUES ('last_sync', $1, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = EXCLUDED.updated_at
+    `, [new Date().toISOString()]);
+    
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  // Set last sync timestamp
-  pipeline.set('sync:last', new Date().toISOString());
-
-  // Execute all Redis commands
-  await pipeline.exec();
 
   // Count customers with visits and spend
   const visitorsCount = Array.from(customerMetrics.values()).filter(m => m.visitCount > 0).length;
@@ -136,15 +153,24 @@ export async function syncCustomerData() {
 }
 
 export async function shouldAutoSync(staleMinutes: number = 60): Promise<boolean> {
-  const lastSync = await redis.get('sync:last');
+  const client = await pool.connect();
   
-  if (!lastSync) {
-    return true; // No sync has ever been done
+  try {
+    const result = await client.query(
+      'SELECT value FROM sync_metadata WHERE key = $1',
+      ['last_sync']
+    );
+    
+    if (result.rows.length === 0) {
+      return true; // No sync has ever been done
+    }
+
+    const lastSyncTime = new Date(result.rows[0].value).getTime();
+    const now = Date.now();
+    const minutesSinceSync = (now - lastSyncTime) / (1000 * 60);
+
+    return minutesSinceSync > staleMinutes;
+  } finally {
+    client.release();
   }
-
-  const lastSyncTime = new Date(lastSync as string).getTime();
-  const now = Date.now();
-  const minutesSinceSync = (now - lastSyncTime) / (1000 * 60);
-
-  return minutesSinceSync > staleMinutes;
 }

@@ -185,7 +185,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {currentVisitsData?.customers.map((customer, index) => (
+                {currentVisitsData?.customers?.map((customer, index) => (
                   <div
                     key={customer.customerId}
                     className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
@@ -220,7 +220,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {currentSpendData?.customers.map((customer, index) => (
+                {currentSpendData?.customers?.map((customer, index) => (
                   <div
                     key={customer.customerId}
                     className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"

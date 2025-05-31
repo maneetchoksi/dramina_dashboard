@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { syncCustomerData } from '@/lib/sync';
+import { initializeDatabase } from '@/lib/db';
 
 export async function POST() {
   try {
+    // Ensure database tables exist before syncing
+    await initializeDatabase();
+    
     const result = await syncCustomerData();
 
     return NextResponse.json({
