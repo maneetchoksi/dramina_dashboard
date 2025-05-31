@@ -5,6 +5,7 @@ import { CustomerMetrics } from '@/types/loyalty';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 interface DashboardData {
   customers: CustomerMetrics[];
@@ -144,6 +145,7 @@ export default function Home() {
                 Last synced: {formatDate(topByVisits.all.lastSync)}
               </span>
             )}
+            <ThemeToggle />
             <Button
               onClick={syncData}
               disabled={syncing}
