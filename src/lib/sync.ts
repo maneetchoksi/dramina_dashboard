@@ -1,10 +1,10 @@
 import axios from 'axios';
 import { pool } from '@/lib/db';
-import { 
-  LoyaltyApiResponse, 
+import {
+  LoyaltyApiResponse,
   LoyaltyOperation,
-  CustomerMetrics, 
-  EVENT_IDS 
+  CustomerMetrics,
+  EVENT_IDS
 } from '@/types/loyalty';
 
 export async function syncCustomerData() {
@@ -30,11 +30,11 @@ export async function syncCustomerData() {
 
     // Add operations from this page
     allOperations.push(...response.data.data);
-    
+
     // Calculate total pages based on metadata
     const { totalItems, itemsPerPage } = response.data.meta;
     totalPages = Math.ceil(totalItems / itemsPerPage);
-    
+
     console.log(`Fetched page ${currentPage}/${totalPages} (${response.data.data.length} operations)`);
     currentPage++;
   } while (currentPage <= totalPages);
@@ -54,10 +54,10 @@ export async function syncCustomerData() {
     processedOperationIds.add(operation.id);
 
     const customerId = operation.customerId;
-    
+
     // Track the latest managerId for this customer
     customerManagerMap.set(customerId, operation.managerId);
-    
+
     // Initialize customer metrics if not exists
     if (!customerMetrics.has(customerId)) {
       customerMetrics.set(customerId, {
@@ -72,7 +72,7 @@ export async function syncCustomerData() {
     }
 
     const metrics = customerMetrics.get(customerId)!;
-    
+
     // Update managerId only if the operation has a non-null managerId
     // This ensures we keep the last known valid managerId
     if (operation.managerId !== null) {
@@ -89,13 +89,13 @@ export async function syncCustomerData() {
 
   // Store in PostgreSQL using transaction for efficiency
   const client = await pool.connect();
-  
+
   try {
     await client.query('BEGIN');
-    
+
     // Clear existing customer data
     await client.query('DELETE FROM customers');
-    
+
     // Insert all customer data in batch using upsert
     const values = Array.from(customerMetrics.values());
     if (values.length > 0) {
@@ -110,7 +110,7 @@ export async function syncCustomerData() {
           manager_id = EXCLUDED.manager_id,
           last_updated = CURRENT_TIMESTAMP
       `;
-      
+
       const insertValues = values.flatMap(metrics => [
         metrics.customerId,
         metrics.firstName,
@@ -119,10 +119,10 @@ export async function syncCustomerData() {
         metrics.totalSpend,
         metrics.managerId
       ]);
-      
+
       await client.query(insertQuery, insertValues);
     }
-    
+
     // Set last sync timestamp
     await client.query(`
       INSERT INTO sync_metadata (key, value, updated_at)
@@ -131,7 +131,7 @@ export async function syncCustomerData() {
         value = EXCLUDED.value,
         updated_at = EXCLUDED.updated_at
     `, [new Date().toISOString()]);
-    
+
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -154,13 +154,13 @@ export async function syncCustomerData() {
 
 export async function shouldAutoSync(staleMinutes: number = 60): Promise<boolean> {
   const client = await pool.connect();
-  
+
   try {
     const result = await client.query(
       'SELECT value FROM sync_metadata WHERE key = $1',
       ['last_sync']
     );
-    
+
     if (result.rows.length === 0) {
       return true; // No sync has ever been done
     }
